@@ -3,56 +3,43 @@
     <Header />
     
     <div class="container mx-auto py-8 px-4">
-      <h2 class="text-3xl font-bold mb-6">Активні голосування</h2>
+      <div class="flex justify-between items-center mb-6">
+        <h2 class="text-3xl font-bold">Активні голосування</h2>
+        <RouterLink 
+          to="/votings/create"
+          class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition-colors"
+        >
+          Створити голосування
+        </RouterLink>
+      </div>
       
       <div v-if="loading" class="text-center">
-        Завантаження...
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+        <p>Завантаження...</p>
       </div>
       
       <div v-else-if="votings.length === 0" class="text-center text-gray-600">
-        Наразі немає активних голосувань
+        <p class="text-xl mb-4">Наразі немає активних голосувань</p>
+        <RouterLink 
+          to="/votings/create"
+          class="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600 transition-colors"
+        >
+          Створити перше голосування
+        </RouterLink>
       </div>
       
       <div v-else class="grid gap-4">
-        <div 
-          v-for="voting in votings" 
+        <VotingCard
+          v-for="voting in votings"
           :key="voting.id"
-          class="bg-white p-6 rounded-lg shadow border"
-        >
-          <h3 class="text-xl font-semibold mb-2">{{ voting.title }}</h3>
-          <p class="text-gray-600 mb-4">{{ voting.description }}</p>
-          <div class="flex justify-between items-center mb-4">
-            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-              {{ voting.tag }}
-            </span>
-            <span class="text-sm text-gray-500">
-              {{ formatDate(voting.created_at) }}
-            </span>
-          </div>
-          
-          <!-- Додати кнопки голосування -->
-          <div class="flex space-x-2">
-            <button 
-              @click="vote(voting.id)"
-              :disabled="isVoting"
-              class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:opacity-50"
-            >
-              {{ isVoting ? 'Голосуємо...' : 'Проголосувати' }}
-            </button>
-            
-            <button 
-              @click="showVotes(voting.id)"
-              class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
-            >
-              Результати
-            </button>
-          </div>
-          
-          <!-- Показати кількість голосів -->
-          <div v-if="votesCounts[voting.id]" class="mt-2 text-sm text-gray-600">
-            Голосів: {{ votesCounts[voting.id] }}
-          </div>
-        </div>
+          :voting="voting"
+          :vote-count="votesCounts[voting.id] || 0"
+          :user-voted="userVotes[voting.id] || false"
+          @vote="handleVote"
+          @show-details="showVotingDetails"
+          @edit-voting="editVoting"
+          @delete-voting="deleteVoting"
+        />
       </div>
     </div>
   </main>
@@ -60,31 +47,32 @@
 
 <script setup lang="ts">
 import { ref, onMounted, reactive } from 'vue'
+import { useRouter } from 'vue-router'
 import Header from '@/components/Header.vue'
+import VotingCard, { type Voting } from '@/components/VotingCard.vue'
+import { useAuthStore } from '@/stores/auth'
 import api from '@/services/api'
-interface Voting {
-  id: string
-  author_id: string
-  title: string
-  description: string
-  created_at: string | Date
-  tag: string
-  status: 'active' | 'closed' | 'deleted'
-  result_text?: string
-}
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 const votings = ref<Voting[]>([])
 const loading = ref(true)
-const isVoting = ref(false)
 const votesCounts = reactive<Record<string, number>>({})
+const userVotes = reactive<Record<string, boolean>>({})
 
 const fetchVotings = async () => {
   try {
     const response = await api.get('/votings/public')
     if (response.data.success) {
       votings.value = response.data.data
+      
+      // Завантажити дані для кожного голосування
       for (const voting of votings.value) {
-        await fetchVoteCount(voting.id)
+        await Promise.all([
+          fetchVoteCount(voting.id),
+          checkUserVote(voting.id)
+        ])
       }
     }
   } catch (error) {
@@ -105,39 +93,63 @@ const fetchVoteCount = async (votingId: string) => {
   }
 }
 
-const vote = async (votingId: string) => {
+const checkUserVote = async (votingId: string) => {
   try {
-    isVoting.value = true
+    const response = await api.get(`/votes/voting/${votingId}`)
+    if (response.data.success) {
+      // Перевірити чи є голос поточного користувача
+      const userVote = response.data.data.find(
+        (vote: any) => vote.user_id === authStore.user?.uid
+      )
+      userVotes[votingId] = !!userVote
+    }
+  } catch (error) {
+    console.error('Error checking user vote:', error)
+  }
+}
+
+const handleVote = async (votingId: string) => {
+  try {
     const response = await api.post('/votes', { voting_id: votingId })
     
     if (response.data.success) {
-      await fetchVoteCount(votingId)
-      alert(response.data.message)
+      // Оновити дані
+      await Promise.all([
+        fetchVoteCount(votingId),
+        checkUserVote(votingId)
+      ])
+      
+      // Показати повідомлення
+      const message = userVotes[votingId] ? 'Голос скасовано!' : 'Голос записано!'
+      alert(message)
     }
   } catch (error: any) {
     console.error('Error voting:', error)
     alert(error.response?.data?.error || 'Помилка при голосуванні')
-  } finally {
-    isVoting.value = false
   }
 }
 
-const showVotes = async (votingId: string) => {
-  try {
-    const response = await api.get(`/votes/voting/${votingId}`)
-    if (response.data.success) {
-      alert(`Кількість голосів: ${response.data.count}`)
+const showVotingDetails = (votingId: string) => {
+  router.push(`/votings/${votingId}`)
+}
+
+const editVoting = (votingId: string) => {
+  router.push(`/votings/${votingId}/edit`)
+}
+
+const deleteVoting = async (votingId: string) => {
+  if (confirm('Ви впевнені, що хочете видалити це голосування?')) {
+    try {
+      const response = await api.delete(`/votings/${votingId}`)
+      if (response.data.success) {
+        alert('Голосування видалено!')
+        fetchVotings() // Перезавантажити список
+      }
+    } catch (error: any) {
+      console.error('Error deleting voting:', error)
+      alert(error.response?.data?.error || 'Помилка при видаленні')
     }
-  } catch (error) {
-    console.error('Error fetching votes:', error)
   }
-}
-
-const formatDate = (date: string | Date) => {
-  if (typeof date === 'string') {
-    return new Date(date).toLocaleDateString()
-  }
-  return date.toLocaleDateString()
 }
 
 onMounted(() => {

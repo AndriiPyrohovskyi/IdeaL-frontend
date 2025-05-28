@@ -27,20 +27,62 @@ const router = createRouter({
       name: 'votings',
       component: () => import('../views/VotingsView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/votings/create',
+      name: 'create-voting',
+      component: () => import('../views/CreateVotingView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/votings/:id',
+      name: 'voting-details',
+      component: () => import('./../views/VotingDetailsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/votings/:id/edit',
+      name: 'edit-voting',
+      component: () => import('././../views/EditVotingView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('../views/ProfileView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/profile/votings',
+      name: 'user-votings',
+      component: () => import('./../views/UserVotingsView.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/profile/votes',
+      name: 'user-votes',
+      component: () => import('./../views/UserVotesView.vue'),
+      meta: { requiresAuth: true }
     }
   ],
 })
+
+// Гарди маршрутів з правильною ініціалізацією
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  
+  // Дочекатися ініціалізації автентифікації
   if (!authStore.isInitialized) {
     await authStore.initializeAuth()
   }
   
+  // Перевірка на необхідність автентифікації
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next('/login')
     return
   }
   
+  // Перевірка для гостьових сторінок (логін/реєстрація)
   if (to.meta.requiresGuest && authStore.isAuthenticated) {
     next('/')
     return
